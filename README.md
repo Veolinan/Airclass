@@ -1,4 +1,4 @@
-#AirClass – Touchless Interactive Learning for Everyone
+##AirClass – Touchless Interactive Learning for Everyone
 
 AirClass is an **AI-powered, gesture-controlled educational platform** designed to make learning **inclusive, engaging, and accessible**, especially for **physically challenged learners**.  
 It uses **computer vision, hand tracking, and gesture-based interaction** to create a fully **touchless classroom experience** where learners interact with lessons by moving their hands in the air.  
@@ -63,7 +63,7 @@ python -m venv venv
 
 ### 3. Activate Virtual Environment
 ```bash
-venv\Scriptsctivate
+venv/Scripts/activate
 ```
 You should see `(venv)` before your command prompt.
 
