@@ -1,185 +1,93 @@
-# File: main.py
-import os
-import sys
-import time
-import pygame
 import cv2
-import numpy as np
+import time
+from modules.hand_tracker import HandTracker
+from modules.menu import Menu
+from modules.sound_player import play_sound
 
-# ensure local packages importable when running py main.py
-sys.path.append(os.path.dirname(__file__))
+# 🎓 Lesson Modules
+from modules.shapes_colors import run_shapes_colors
+from modules.numbers.numbers import run_numbers      # ✅ Submenu for Numbers
+from modules.numbers.counting import run_counting    # ✅ Renamed from run_counting_game
+from modules.spellings import run_spellings
+from modules.drawing import run_drawing
 
-from utils.graphics import Button, draw_text_center
-from utils.hand_tracker import HandTracker
-from utils.sound import SoundManager
-from modules import counting, numbers, shapes, sorting
+# 🟨 Setup Camera & Hand Tracker
+cap = cv2.VideoCapture(0)
+success, frame = cap.read()
+if not success:
+    print("❌ Failed to grab frame on startup.")
+    exit()
 
-# Constants
-WIDTH, HEIGHT = 1280, 720
-FPS = 30
+h, w = frame.shape[:2]
+tracker = HandTracker()
 
-# Init
-pygame.init()
-pygame.mixer.init()  # safe even if audio device is missing on some systems
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("AirClass — Touchless Learning")
-clock = pygame.time.Clock()
-
-# Sound manager (silent fallback if files missing)
-sound = SoundManager(assets_dir=os.path.join(os.path.dirname(__file__), "assets", "sounds"))
-sound.load("click", "click.wav")
-sound.load("success", "success.wav")
-sound.load("error", "error.wav")
-# try play theme, but silently continue if missing
-sound.play_music("theme.mp3")
-
-# Camera + hand tracker (shared)
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, WIDTH)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-time.sleep(0.2)
-if not cap.isOpened():
-    print("[Camera Warning] Could not open camera. App will run with blank background.")
-hand_tracker = HandTracker(max_num_hands=1)
-
-# UI buttons (rect, text, base_color)
-WHITE = (255, 255, 255)
-BLUE = (40, 140, 255)
-RED = (210, 60, 60)
-buttons = [
-    Button((WIDTH // 2 - 220, 160, 440, 100), "Counting", BLUE),
-    Button((WIDTH // 2 - 220, 290, 440, 100), "Sorting", BLUE),
-    Button((WIDTH // 2 - 220, 420, 440, 100), "Numbers", BLUE),
-    Button((WIDTH // 2 - 220, 550, 440, 100), "Shapes", BLUE),
-    Button((WIDTH // 2 - 120, 640, 240, 60), "Exit", RED),
+# 🧡 Main Menu Items
+menu_labels = [
+    "Shapes & Colors",
+    "Numbers",
+    "Counting",
+    "Spellings",
+    "Drawing",
+    "Quit"
 ]
+menu = Menu(menu_labels, w, h)
 
+# 🟧 Main Loop
+while True:
+    success, frame = cap.read()
+    if not success:
+        print("❌ Failed to grab frame")
+        break
 
-def get_frame():
-    """Return (frame_bgr) or None. Frame is not flipped here."""
-    if not cap.isOpened():
-        return None
-    ret, frame = cap.read()
-    if not ret:
-        return None
-    # mirror for intuitive interaction
     frame = cv2.flip(frame, 1)
-    # ensure expected size
-    frame = cv2.resize(frame, (WIDTH, HEIGHT))
-    return frame
+    landmarks = tracker.get_landmarks(frame)
 
+    # 🎨 Draw Menu
+    menu.draw(frame)
 
-def frame_to_surface(frame_bgr, alpha=None):
-    """Convert BGR OpenCV frame to pygame surface. Optionally set alpha (0-255)."""
-    if frame_bgr is None:
-        surf = pygame.Surface((WIDTH, HEIGHT))
-        surf.fill((0, 0, 0))
-        return surf
-    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    surf = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
-    if alpha is not None:
-        surf.set_alpha(alpha)
-    return surf
+    # ✋ Check Pinch-Hold Selection
+    if landmarks and len(landmarks) >= 9:
+        x1, y1 = landmarks[4]  # Thumb tip
+        x2, y2 = landmarks[8]  # Index tip
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        dist = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
 
+        # 🔄 Update hover (with glow/sound in Menu class)
+        menu.update_hover(cx, cy)
 
-def main_menu():
-    running = True
-    hover_pointer = None  # pixel (x,y) of index fingertip when present
-    pointing_active = False
+        # ✅ Detect press-and-hold gesture
+        if dist < 40:
+            selection = menu.update_selection_timer(cx, cy)
+            if selection:
+                print(f"✅ Selected: {selection}")
+                play_sound("assets/sounds/welcome.mp3")
 
-    while running:
-        clock.tick(FPS)
+                # 🚀 Launch the selected module
+                if selection == "Shapes & Colors":
+                    run_shapes_colors(cap, tracker)
+                elif selection == "Numbers":
+                    run_numbers(cap, tracker)  # ➕ Submenu with math modes
+                elif selection == "Counting":
+                    run_counting(cap, tracker)
+                elif selection == "Spellings":
+                    run_spellings(cap, tracker)
+                elif selection == "Drawing":
+                    run_drawing(cap, tracker)
+                elif selection == "Quit":
+                    break
 
-        # --- camera background ---
-        frame = get_frame()
-        if frame is not None:
-            # process hand (returns dict)
-            hand_data = hand_tracker.process(frame)
-            # we draw landmarks later on top; keep 'frame' as base
-        else:
-            # blank frame if no camera
-            hand_data = {'frame': None, 'index_pos': None, 'pinch': False, 'landmarks': None}
+                time.sleep(1)  # ⏸ Prevent accidental re-entry
 
-        # base background
-        bg = frame_to_surface(hand_data['frame'])
-        screen.blit(bg, (0, 0))
+    # ✋ Draw Hand Skeleton
+    tracker.draw_hand(frame)
 
-        # UI title
-        draw_text_center(screen, "AirClass — Touchless Learning", 48, WHITE, (WIDTH // 2, 60))
+    # 👀 Show App Window
+    cv2.imshow("🟦 Touchless Tutor", frame)
 
-        # pointer state from hand_data
-        idx = hand_data.get('index_pos')
-        pinch = hand_data.get('pinch', False)
-        # pointing_active: index present and not pinching
-        pointing_active = (idx is not None) and (not pinch)
-        hover_pointer = idx
+    # 🔚 Exit Key
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
 
-        # draw buttons and handle point-and-hold selection
-        for b in buttons:
-            progress = b.update_hover(hover_pointer, pointing_active)
-            b.draw(screen, hover_progress=progress)
-            if progress >= 1.0:
-                sound.play("click")
-                # route
-                if b.text == "Counting":
-                    counting.run(screen, clock, cap, hand_tracker, sound)
-                elif b.text == "Sorting":
-                    sorting.run(screen, clock, cap, hand_tracker, sound)
-                elif b.text == "Numbers":
-                    numbers.run(screen, clock, cap, hand_tracker, sound)
-                elif b.text == "Shapes":
-                    shapes.run(screen, clock, cap, hand_tracker, sound)
-                elif b.text == "Exit":
-                    running = False
-                # reset hovers so user doesn't immediately re-enter
-                for bb in buttons:
-                    bb.reset_hover()
-                break
-
-        # draw hand overlay ON TOP of UI (ensure visible)
-        if hand_data['frame'] is not None:
-            # draw landmarks onto a copy of frame so we don't modify original
-            overlay_frame = hand_data['frame'].copy()
-            hand_tracker.draw_hand(overlay_frame, landmark_color=(0, 255, 0), connections_color=(0, 200, 0), thickness=2)
-            overlay = frame_to_surface(overlay_frame, alpha=220)  # slightly translucent so UI still readable
-            screen.blit(overlay, (0, 0))
-
-        # events (also allow mouse click fallback)
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                mp = pygame.mouse.get_pos()
-                # allow clicking menu with mouse as fallback
-                for b in buttons:
-                    if b.is_hovered(mp):
-                        sound.play("click")
-                        if b.text == "Counting":
-                            counting.run(screen, clock, cap, hand_tracker, sound)
-                        elif b.text == "Sorting":
-                            sorting.run(screen, clock, cap, hand_tracker, sound)
-                        elif b.text == "Numbers":
-                            numbers.run(screen, clock, cap, hand_tracker, sound)
-                        elif b.text == "Shapes":
-                            shapes.run(screen, clock, cap, hand_tracker, sound)
-                        elif b.text == "Exit":
-                            running = False
-                        for bb in buttons:
-                            bb.reset_hover()
-                        break
-
-        pygame.display.flip()
-
-    # cleanup
-    cap.release()
-    pygame.quit()
-
-
-if __name__ == "__main__":
-    try:
-        main_menu()
-    except Exception as e:
-        print("Fatal error:", e)
-        cap.release()
-        pygame.quit()
-        raise
+# 🔒 Cleanup
+cap.release()
+cv2.destroyAllWindows()
